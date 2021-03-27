@@ -29,6 +29,7 @@ let main = async () => {
     products.push(...await droptrends.run());
 
     await browser.close();
+    await database.goOffline();
 
     if (products.length) {
         await webhook.send(products, {

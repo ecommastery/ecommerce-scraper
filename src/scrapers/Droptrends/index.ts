@@ -169,8 +169,7 @@ export default class Droptrends {
     }
 
     private login = async () => {
-        let browser = await puppeteer.launch();
-        let page = await browser.newPage();
+        let page = await this.browser.newPage();
 
         await page.goto(this.uri + '/login.php', { waitUntil: 'networkidle0' });
 
@@ -181,8 +180,6 @@ export default class Droptrends {
         await page.waitForSelector('body > nav > a:nth-child(10) > i');
 
         let cookies = await page.cookies();
-
-        browser.close();
 
         return cookies;
     }
