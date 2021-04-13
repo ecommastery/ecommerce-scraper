@@ -1,21 +1,15 @@
 import puppeteer from 'puppeteer';
 import { MessageEmbed } from 'discord.js';
-import config from '../../util/config';
+import config from '../util/config';
 import firebase from 'firebase'
-import LooseObject from '../../interfaces/LooseObject';
+import LooseObject from '../common/interfaces/LooseObject';
+import { Scraper } from '../common/classes/scraper';
 
-export default class Droptrends {
+export default class Droptrends extends Scraper {
 
-    private database: firebase.database.Database;
     private uri: string = 'https://www.droptrends.site';
-    private browser: puppeteer.Browser;
 
-    public constructor(database: firebase.database.Database, browser: puppeteer.Browser) {
-        this.database = database;
-        this.browser = browser;
-    }
-
-    private getEmbed = async (info: LooseObject): Promise<MessageEmbed> => {
+    private getEmbed = (info: LooseObject): MessageEmbed => {
         let embed = new MessageEmbed()
             .setTitle(info.productName)
             .setThumbnail('attachment://thumbnail.png')
@@ -85,11 +79,11 @@ export default class Droptrends {
     
         await page.goto(link, { waitUntil: 'networkidle0' });
     
-        let info: LooseObject = await page.evaluate(async () => {
+        let info: LooseObject = await page.evaluate(() => {
             let productName = <string | null>document.querySelector('.header-title-div1>h2')!.textContent; 
             let selector = '#about > div.product-section-contaner.product-informations > div.product-information-contaner > div.product-informations-div2';
             let productDescription = <string | null>document.querySelector(selector)!.textContent;
-            let imageUrl = <string | null>document.querySelector('div.product-images-contaner>div>div>div.swiper-slide-active')?.getAttribute('style')?.replace(/url\("(.+)"\)/, '$1');
+            let imageUrl = <string | null>document.querySelector('div.product-images-contaner>div>div>div.swiper-slide-active')?.getAttribute('style')?.replace(/.+url\("(.+)"\).+/, '$1')
             let sellingPrice = <string | null>document.querySelector('b.product-informations-value-dark')?.textContent;
             let productCost = <string | null>document.querySelector('b.product-informations-value-green')?.textContent;
             let profitMargin = <string | null>document.querySelector('b.product-informations-value-red')?.textContent;
@@ -124,7 +118,7 @@ export default class Droptrends {
             let competitorStore = onClickFunction?.replace(/\n/g, '').replace(/.+'(.+)'.+/, '$1'); 
             
             return { interests, downloadUrl, productName, imageUrl, sellingPrice, productCost, profitMargin, aliExpressLink, alternateAliExpressLink, competitorStore, promoVid, productDescription, saturationValue };
-        });
+        }).catch((e) => {console.log(e); return {}});
     
         try {
             await page.click('button.view-ads');
@@ -143,7 +137,7 @@ export default class Droptrends {
     }
 
     private getNextProduct = async () => {
-        let snapshot = await this.database.ref('settings/nextProductId').get();
+        let snapshot = await this.database.ref('settings/droptrends').get();
         if (snapshot.exists()) {
             return <number>snapshot.val();
         } else {
@@ -152,7 +146,7 @@ export default class Droptrends {
     }
 
     private getNextDemoProduct = async () => {
-        let snapshot = await this.database.ref('settings/nextDemoProductId').get();
+        let snapshot = await this.database.ref('settings/droptrendsDemo').get();
         if (snapshot.exists()) {
             return <number>snapshot.val();
         } else {
@@ -161,11 +155,11 @@ export default class Droptrends {
     }
 
     private setNextDemoProduct = async (productId: number) => {
-        await this.database.ref('settings/nextDemoProductId').set(productId);
+        await this.database.ref('settings/droptrendsDemo').set(productId);
     }
 
     private setNextProduct = async (productId: number) => {
-        await this.database.ref('settings/nextProductId').set(productId);
+        await this.database.ref('settings/droptrends').set(productId);
     }
 
     private login = async () => {
@@ -193,7 +187,7 @@ export default class Droptrends {
 
         await page.goto(`${this.uri}/view-product.php?pid=${productId}`);
 
-        let el = await page.waitForSelector('.header-title-div1>h2', {timeout: 5000}).catch(() => null);
+        let el = await page.waitForSelector('.header-title-div1>h2', {timeout: 5000}).then(el => el?.evaluate(node => node.innerText)).catch(() => null);
 
         return !!el;
     }
@@ -213,16 +207,19 @@ export default class Droptrends {
     public run = async () => {
         const cookies = await this.login();
         let productId = await this.getNextProduct();
-        let products: MessageEmbed[] = [];
+        const unresolvedProducts: Promise<LooseObject>[] = [];
 
-        while (await this.pageExists(productId, cookies)) {
-            const info = await this.scrapeProduct(`${this.uri}/view-product.php?pid=${productId}`, cookies);
-            products.push(await this.getEmbed(info));
+        while ((await this.pageExists(productId, cookies))) {
+            const info = this.scrapeProduct(`${this.uri}/view-product.php?pid=${productId}`, cookies);
             
+            unresolvedProducts.push(info);
+
             productId++;
         }
 
+        const embeds = (await Promise.all(unresolvedProducts)).map((info) => this.getEmbed(info));
+
         await this.setNextProduct(productId);
-        return products;
+        return embeds;
     }
 }
